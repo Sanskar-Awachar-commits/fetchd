@@ -1,0 +1,25 @@
+# Local user configuration & runtime files
+config.json
+.env
+fetchd.lock
+*.old
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Release artifacts
+release_assets/

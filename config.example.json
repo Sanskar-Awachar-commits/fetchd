@@ -1,0 +1,17 @@
+{
+  "install_dir": "~/programs",
+  "projects": [
+    {
+      "repo": "Sanskar-Awachar-commits/fetchd",
+      "binary_name": "fetchd",
+      "env": true,
+      "build_command": "pyinstaller --onefile --name fetchd fetchd.py && cp dist/fetchd ."
+    },
+    {
+      "repo": "owner/example-tool",
+      "binary_name": "example-tool",
+      "env": false,
+      "build_command": "g++ -O3 -std=c++20 main.cpp -o example-tool"
+    }
+  ]
+}
