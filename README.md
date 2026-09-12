@@ -1,71 +1,90 @@
 # fetchd
 
-`fetchd` is a lightweight, cross-platform background daemon/utility that keeps your custom tools and CLI utilities automatically synchronized. It fetches prebuilt binaries from GitHub Releases or automatically falls back to cloning and compiling from source.
+`fetchd` is a lightweight, cross-platform background daemon/utility that keeps your personal CLI utilities and tools automatically synchronized. It automatically downloads precompiled binaries from GitHub Releases or falls back to compiling from source.
 
 ## Features
 
-- **GitHub Release Auto-Sync**: Automatically detects your OS (Linux, macOS, Windows) and downloads the corresponding binary release asset.
-- **Source Build Fallback**: If no matching prebuilt release binary is found (or on private/unreleased commits), `fetchd` shallow clones the repository and executes your specified build command.
-- **Atomic Binary Replacement**: Safely updates executables in-place without corrupting running processes (handles Windows file locking and POSIX atomic replacements).
+- **GitHub Release Auto-Sync**: Automatically detects your OS (Linux, macOS, Windows) and downloads the corresponding release binary.
+- **Source Build Fallback**: If no matching release binary is found (or on private repos / direct commits), `fetchd` shallow clones the repository and executes your custom build command.
+- **Atomic Binary Hot-Swapping**: Safely replaces binaries in-place without crashing running processes (handles Windows file locking and POSIX atomic replacements).
 - **Process Concurrency Lock**: Non-blocking lock prevents overlapping runs.
 - **Automated Scheduling**: One-click native background service installation across Windows (Task Scheduler), macOS (Launchd), and Linux (systemd / cron).
-- **Granular Environment & PATH Control (`env`)**: Whitelist only the tools you trust to be exposed to your shell's `PATH` and `.env` file.
+- **Granular Environment & PATH Control (`env`)**: Whitelist only the tools you trust to be exposed in your shell's `PATH` and `.env` file.
 
-## Installation
+---
 
-### Prerequisites
-- Python 3.8+
-- `git` (for fallback source builds)
-- C++ compiler / PyInstaller / Go / Rust (depending on the build commands configured for your projects)
+## Quick Start (Prebuilt Binary — No Python Required)
 
-### Quick Start
+Download the standalone executable for your operating system from [Releases](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest):
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Sanskar-Awachar-commits/fetchd.git
-   cd fetchd
-   ```
+### Linux / macOS
+```bash
+# 1. Download standalone binary (replace fetchd-linux with fetchd-macos on Mac)
+curl -L -o fetchd https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest/download/fetchd-linux
+chmod +x fetchd
 
-2. Copy the example configuration:
-   ```bash
-   cp config.example.json config.json
-   ```
-   *(If you run `python fetchd.py` without a `config.json`, it will automatically create one from `config.example.json`).*
+# 2. Run once to create config.json
+./fetchd
 
-3. Edit `config.json` with your repositories and build commands.
+# 3. (Optional) Install as daily background service
+./fetchd --install-service
+```
 
-4. Run `fetchd` on demand:
-   ```bash
-   python fetchd.py
-   ```
+### Windows (PowerShell)
+```powershell
+# 1. Download standalone binary
+Invoke-WebRequest -Uri https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest/download/fetchd-windows.exe -OutFile fetchd.exe
+
+# 2. Run once to create config.json
+.\fetchd.exe
+
+# 3. (Optional) Install as daily background service
+.\fetchd.exe --install-service
+```
+
+---
+
+## Running from Source / Development (Optional)
+
+If you prefer running `fetchd` directly with Python:
+
+```bash
+git clone https://github.com/Sanskar-Awachar-commits/fetchd.git
+cd fetchd
+python fetchd.py
+```
+
+---
 
 ## Automated Background Scheduling
 
-You don't need to manually configure cron jobs or Task Scheduler. `fetchd` includes built-in service installation:
+`fetchd` includes built-in service installation so you don't have to manually configure cron jobs:
 
-### 1. Native Service Installation (Runs Daily by Default)
-To register `fetchd` as a native daily background task on your operating system:
+### 1. Daily Background Task (Recommended)
+Register `fetchd` as a native daily background task:
 ```bash
-python fetchd.py --install-service
+fetchd --install-service
 ```
 - **Windows**: Automatically creates a daily task in Windows Task Scheduler.
 - **Linux**: Automatically creates and enables a user `systemd` timer (or `@daily` crontab entry).
 - **macOS**: Automatically creates and loads a `launchd` LaunchAgent.
 
-To remove the background task:
+To remove the scheduled task:
 ```bash
-python fetchd.py --uninstall-service
+fetchd --uninstall-service
 ```
 
-### 2. Continuous Daemon Mode
+### 2. Daemon Mode
 To run `fetchd` continuously in a loop (e.g. inside `tmux` or a container):
 ```bash
-python fetchd.py --daemon --interval 86400
+fetchd --daemon --interval 86400
 ```
+
+---
 
 ## Configuration
 
-Edit `config.json` to define your target installation directory and the repositories you want to synchronize:
+Edit `config.json` (created automatically on first run) to define your target installation directory and the repositories you want to synchronize:
 
 ```json
 {
@@ -104,9 +123,9 @@ Following the **principle of least privilege**, `"env"` defaults to `false`. All
 
 ### GitHub Token (Optional)
 
-GitHub provides **60 free API requests per hour** for unauthenticated requests. For daily syncing of your personal tools, **no token is required**. 
+GitHub provides **60 free API requests per hour** for unauthenticated requests. For personal daily syncing, **no token is needed**.
 
-If you are syncing private repositories or wish to increase the rate limit:
+If you are syncing private repositories or want higher rate limits:
 ```bash
 export GITHUB_TOKEN="ghp_yourPersonalAccessToken"
 ```

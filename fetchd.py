@@ -11,7 +11,15 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    EXEC_ARGS = [str(Path(sys.executable).resolve())]
+    EXEC_CMD = f'"{Path(sys.executable).resolve()}"'
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    EXEC_ARGS = [sys.executable, str(Path(__file__).resolve())]
+    EXEC_CMD = f'"{sys.executable}" "{Path(__file__).resolve()}"'
+
 CONFIG_PATH = BASE_DIR / "config.json"
 EXAMPLE_CONFIG_PATH = BASE_DIR / "config.example.json"
 ENV_PATH = BASE_DIR / ".env"
@@ -233,14 +241,11 @@ def update_env(install_dir: Path, projects: list, os_key: str):
 
 def install_service():
     os_key = detect_platform_keyword()
-    script_path = Path(__file__).resolve()
-    python_exec = sys.executable
 
     if os_key == "windows":
-        cmd = f'"{python_exec}" "{script_path}"'
         try:
             subprocess.run(
-                ["schtasks", "/Create", "/TN", "fetchd", "/TR", cmd, "/SC", "DAILY", "/F"],
+                ["schtasks", "/Create", "/TN", "fetchd", "/TR", EXEC_CMD, "/SC", "DAILY", "/F"],
                 check=True,
                 capture_output=True,
                 text=True
@@ -252,6 +257,7 @@ def install_service():
     elif os_key == "macos":
         plist_path = Path.home() / "Library" / "LaunchAgents" / "com.sanskar.fetchd.plist"
         plist_path.parent.mkdir(parents=True, exist_ok=True)
+        args_xml = "".join(f"<string>{arg}</string>\n        " for arg in EXEC_ARGS)
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -260,8 +266,7 @@ def install_service():
     <string>com.sanskar.fetchd</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_exec}</string>
-        <string>{script_path}</string>
+        {args_xml.strip()}
     </array>
     <key>StartInterval</key>
     <integer>86400</integer>
@@ -288,7 +293,7 @@ Description=fetchd background tool sync service
 
 [Service]
 Type=oneshot
-ExecStart={python_exec} {script_path}
+ExecStart={' '.join(EXEC_ARGS)}
 """
             timer_content = """[Unit]
 Description=Run fetchd daily
@@ -309,11 +314,11 @@ WantedBy=timers.target
             subprocess.run(["systemctl", "--user", "enable", "--now", "fetchd.timer"], check=True)
             print("[+] Successfully installed and started systemd user timer 'fetchd.timer' (Daily).")
         else:
-            cron_entry = f"@daily {python_exec} {script_path} >/dev/null 2>&1\n"
+            cron_entry = f"@daily {' '.join(EXEC_ARGS)} >/dev/null 2>&1\n"
             try:
                 res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
                 existing_cron = res.stdout if res.returncode == 0 else ""
-                if str(script_path) not in existing_cron:
+                if EXEC_ARGS[0] not in existing_cron:
                     new_cron = existing_cron + cron_entry
                     subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
                     print("[+] Added @daily entry to user crontab.")
@@ -325,7 +330,6 @@ WantedBy=timers.target
 
 def uninstall_service():
     os_key = detect_platform_keyword()
-    script_path = Path(__file__).resolve()
 
     if os_key == "windows":
         try:
@@ -359,8 +363,8 @@ def uninstall_service():
         else:
             try:
                 res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-                if res.returncode == 0 and str(script_path) in res.stdout:
-                    filtered = "\n".join(line for line in res.stdout.splitlines() if str(script_path) not in line) + "\n"
+                if res.returncode == 0 and EXEC_ARGS[0] in res.stdout:
+                    filtered = "\n".join(line for line in res.stdout.splitlines() if EXEC_ARGS[0] not in line) + "\n"
                     subprocess.run(["crontab", "-"], input=filtered, text=True, check=True)
                     print("[+] Removed fetchd from crontab.")
                 else:
