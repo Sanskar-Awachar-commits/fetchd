@@ -1,7 +1,7 @@
 # fetchd
 
 [![GitHub Release](https://img.shields.io/github/v/release/Sanskar-Awachar-commits/fetchd?style=flat-square&color=blue)](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Sanskar-Awachar-commits/fetchd/release.yml?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/actions)
+[![Build Status](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml/badge.svg)](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/Sanskar-Awachar-commits/fetchd?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
 
