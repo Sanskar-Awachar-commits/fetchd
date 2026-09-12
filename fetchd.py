@@ -250,7 +250,7 @@ def install_service():
                 capture_output=True,
                 text=True
             )
-            print("[+] Successfully registered 'fetchd' in Windows Task Scheduler (Daily).")
+            print("[+] Registered 'fetchd' in Windows Task Scheduler (Daily).")
         except subprocess.CalledProcessError as e:
             print(f"[-] Failed to register task: {e.stderr.strip() if e.stderr else e}")
 
@@ -279,7 +279,7 @@ def install_service():
             f.write(plist_content)
         subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
         subprocess.run(["launchctl", "load", str(plist_path)], check=True)
-        print(f"[+] Successfully installed and loaded LaunchAgent at {plist_path} (Daily).")
+        print(f"[+] Loaded LaunchAgent at {plist_path} (Daily).")
 
     elif os_key == "linux":
         systemd_user_dir = Path.home() / ".config" / "systemd" / "user"
@@ -289,7 +289,7 @@ def install_service():
             timer_file = systemd_user_dir / "fetchd.timer"
 
             service_content = f"""[Unit]
-Description=fetchd background tool sync service
+Description=fetchd sync service
 
 [Service]
 Type=oneshot
@@ -312,7 +312,7 @@ WantedBy=timers.target
 
             subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
             subprocess.run(["systemctl", "--user", "enable", "--now", "fetchd.timer"], check=True)
-            print("[+] Successfully installed and started systemd user timer 'fetchd.timer' (Daily).")
+            print("[+] Enabled systemd user timer 'fetchd.timer' (Daily).")
         else:
             cron_entry = f"@daily {' '.join(EXEC_ARGS)} >/dev/null 2>&1\n"
             try:
@@ -334,7 +334,7 @@ def uninstall_service():
     if os_key == "windows":
         try:
             subprocess.run(["schtasks", "/Delete", "/TN", "fetchd", "/F"], check=True, capture_output=True)
-            print("[+] Successfully removed 'fetchd' from Windows Task Scheduler.")
+            print("[+] Removed 'fetchd' from Windows Task Scheduler.")
         except subprocess.CalledProcessError as e:
             print(f"[-] Task not found or failed to delete: {e.stderr.strip() if e.stderr else e}")
 
@@ -343,7 +343,7 @@ def uninstall_service():
         if plist_path.exists():
             subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
             plist_path.unlink()
-            print("[+] Successfully uninstalled and deleted LaunchAgent.")
+            print("[+] Removed LaunchAgent.")
         else:
             print("[-] No LaunchAgent found for fetchd.")
 
@@ -359,7 +359,7 @@ def uninstall_service():
             if service_file.exists():
                 service_file.unlink()
             subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-            print("[+] Successfully disabled and removed systemd timer and service.")
+            print("[+] Removed systemd timer and service.")
         else:
             try:
                 res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -409,7 +409,7 @@ def run_sync():
 def main():
     parser = argparse.ArgumentParser(
         prog="fetchd",
-        description="Lightweight auto-sync daemon for personal CLI utilities and GitHub release binaries."
+        description="Sync CLI utilities and GitHub release binaries."
     )
     parser.add_argument(
         "--daemon", "-d",
@@ -420,17 +420,17 @@ def main():
         "--interval", "-i",
         type=int,
         default=86400,
-        help="Interval in seconds for daemon mode (default: 86400 / 1 day)."
+        help="Daemon interval in seconds (default: 86400)."
     )
     parser.add_argument(
         "--install-service",
         action="store_true",
-        help="Install fetchd as a native background scheduled task (daily)."
+        help="Install native background daily service."
     )
     parser.add_argument(
         "--uninstall-service",
         action="store_true",
-        help="Uninstall the background scheduled task."
+        help="Uninstall native background service."
     )
 
     args = parser.parse_args()
@@ -440,7 +440,7 @@ def main():
     elif args.uninstall_service:
         uninstall_service()
     elif args.daemon:
-        print(f"[fetchd] Starting daemon mode (Interval: {args.interval}s)...")
+        print(f"[fetchd] Daemon started (interval: {args.interval}s)")
         while True:
             run_sync()
             time.sleep(args.interval)

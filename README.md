@@ -1,52 +1,39 @@
 # fetchd
 
-`fetchd` is a lightweight, cross-platform background daemon/utility that keeps your personal CLI utilities and tools automatically synchronized. It automatically downloads precompiled binaries from GitHub Releases or falls back to compiling from source.
+Lightweight background utility to sync personal CLI tools and GitHub release binaries across machines.
 
 ## Features
 
-- **GitHub Release Auto-Sync**: Automatically detects your OS (Linux, macOS, Windows) and downloads the corresponding release binary.
-- **Source Build Fallback**: If no matching release binary is found (or on private repos / direct commits), `fetchd` shallow clones the repository and executes your custom build command.
-- **Atomic Binary Hot-Swapping**: Safely replaces binaries in-place without crashing running processes (handles Windows file locking and POSIX atomic replacements).
-- **Process Concurrency Lock**: Non-blocking lock prevents overlapping runs.
-- **Automated Scheduling**: One-click native background service installation across Windows (Task Scheduler), macOS (Launchd), and Linux (systemd / cron).
-- **Granular Environment & PATH Control (`env`)**: Whitelist only the tools you trust to be exposed in your shell's `PATH` and `.env` file.
+- Downloads latest precompiled binaries from GitHub Releases
+- Automatic fallback to git clone & source build if release binary is missing
+- Safe in-place binary replacement (supports active executables on Windows/POSIX)
+- Non-blocking lock to prevent overlapping runs
+- Native background scheduler setup (Windows Task Scheduler, macOS launchd, Linux systemd/cron)
+- Whitelist (`env`) to control which tools are added to PATH and `.env`
 
 ---
 
-## Quick Start (Prebuilt Binary — No Python Required)
+## Installation
 
-Download the standalone executable for your operating system from [Releases](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest):
+### Binaries
 
-### Linux / macOS
+Download the latest binary from [Releases](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest):
+
+**Linux / macOS:**
 ```bash
-# 1. Download standalone binary (replace fetchd-linux with fetchd-macos on Mac)
 curl -L -o fetchd https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest/download/fetchd-linux
 chmod +x fetchd
-
-# 2. Run once to create config.json
 ./fetchd
-
-# 3. (Optional) Install as daily background service
-./fetchd --install-service
 ```
+*(On macOS, use `fetchd-macos`)*
 
-### Windows (PowerShell)
+**Windows (PowerShell):**
 ```powershell
-# 1. Download standalone binary
 Invoke-WebRequest -Uri https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest/download/fetchd-windows.exe -OutFile fetchd.exe
-
-# 2. Run once to create config.json
 .\fetchd.exe
-
-# 3. (Optional) Install as daily background service
-.\fetchd.exe --install-service
 ```
 
----
-
-## Running from Source / Development (Optional)
-
-If you prefer running `fetchd` directly with Python:
+### From Source
 
 ```bash
 git clone https://github.com/Sanskar-Awachar-commits/fetchd.git
@@ -56,27 +43,19 @@ python fetchd.py
 
 ---
 
-## Automated Background Scheduling
+## Usage
 
-`fetchd` includes built-in service installation so you don't have to manually configure cron jobs:
-
-### 1. Daily Background Task (Recommended)
-Register `fetchd` as a native daily background task:
 ```bash
+# Run sync once
+fetchd
+
+# Install daily background service
 fetchd --install-service
-```
-- **Windows**: Automatically creates a daily task in Windows Task Scheduler.
-- **Linux**: Automatically creates and enables a user `systemd` timer (or `@daily` crontab entry).
-- **macOS**: Automatically creates and loads a `launchd` LaunchAgent.
 
-To remove the scheduled task:
-```bash
+# Remove background service
 fetchd --uninstall-service
-```
 
-### 2. Daemon Mode
-To run `fetchd` continuously in a loop (e.g. inside `tmux` or a container):
-```bash
+# Run as daemon (default interval: 86400s / 1 day)
 fetchd --daemon --interval 86400
 ```
 
@@ -84,7 +63,7 @@ fetchd --daemon --interval 86400
 
 ## Configuration
 
-Edit `config.json` (created automatically on first run) to define your target installation directory and the repositories you want to synchronize:
+On first run, `fetchd` creates `config.json` from `config.example.json`:
 
 ```json
 {
@@ -106,33 +85,32 @@ Edit `config.json` (created automatically on first run) to define your target in
 }
 ```
 
-### Configuration Options
+### Options
 
-| Option | Type | Default | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `install_dir` | string | `~/programs` | Target directory where all downloaded/built binaries are placed. |
-| `projects` | list | `[]` | List of project objects to synchronize. |
-| `projects[].repo` | string | *required* | GitHub repository in `owner/repo` format. |
-| `projects[].binary_name` | string | *required* | Target executable filename (`.exe` automatically appended on Windows). |
-| `projects[].env` | boolean | `false` | When `true`, links the binary into `install_dir/bin` and exports it in `.env` / `PATH`. |
-| `projects[].build_command` | string | `null` | Command to compile the project if no release binary is available. |
+| `install_dir` | string | `~/programs` | Directory where binaries are stored. |
+| `projects` | list | `[]` | List of repositories to sync. |
+| `projects[].repo` | string | *required* | `owner/repo` path on GitHub. |
+| `projects[].binary_name` | string | *required* | Target executable name (`.exe` added automatically on Windows). |
+| `projects[].env` | boolean | `false` | When `true`, links binary to `install_dir/bin` and exports to `.env` / `PATH`. |
+| `projects[].build_command` | string | `null` | Build command to run if no release binary is found. |
 
-### Why `env: false` is the Default
+---
 
-Following the **principle of least privilege**, `"env"` defaults to `false`. All binaries are safely downloaded or compiled into `install_dir`, but only explicitly whitelisted tools (`"env": true`) are exposed in `install_dir/bin`, added to your shell's `PATH`, and exported in `.env`.
+## Authentication
 
-### GitHub Token (Optional)
+Optional. Public repos use GitHub's unauthenticated API (60 req/hr). For private repos or higher limits:
 
-GitHub provides **60 free API requests per hour** for unauthenticated requests. For personal daily syncing, **no token is needed**.
-
-If you are syncing private repositories or want higher rate limits:
 ```bash
-export GITHUB_TOKEN="ghp_yourPersonalAccessToken"
+# Linux / macOS
+export GITHUB_TOKEN="ghp_xxx"
+
+# Windows (PowerShell)
+$env:GITHUB_TOKEN="ghp_xxx"
 ```
-On Windows (PowerShell):
-```powershell
-$env:GITHUB_TOKEN="ghp_yourPersonalAccessToken"
-```
+
+---
 
 ## License
 
