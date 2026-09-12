@@ -1,8 +1,8 @@
 # fetchd
 
-[![GitHub Release](https://img.shields.io/github/v/release/Sanskar-Awachar-commits/fetchd?style=flat-square&color=blue)](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
 [![Build Status](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml/badge.svg)](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml)
-[![License](https://img.shields.io/github/license/Sanskar-Awachar-commits/fetchd?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
 
 Lightweight background utility to sync personal CLI tools and GitHub release binaries across machines.
