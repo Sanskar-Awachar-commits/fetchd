@@ -7,7 +7,8 @@
 - **GitHub Release Auto-Sync**: Automatically detects your OS (Linux, macOS, Windows) and downloads the corresponding binary release asset.
 - **Source Build Fallback**: If no matching prebuilt release binary is found (or on private/unreleased commits), `fetchd` shallow clones the repository and executes your specified build command.
 - **Atomic Binary Replacement**: Safely updates executables in-place without corrupting running processes (handles Windows file locking and POSIX atomic replacements).
-- **Process Concurrency Lock**: Non-blocking lock prevents overlapping runs (ideal for cron jobs and scheduled tasks).
+- **Process Concurrency Lock**: Non-blocking lock prevents overlapping runs.
+- **Automated Scheduling**: One-click native background service installation across Windows (Task Scheduler), macOS (Launchd), and Linux (systemd / cron).
 - **Granular Environment & PATH Control (`env`)**: Whitelist only the tools you trust to be exposed to your shell's `PATH` and `.env` file.
 
 ## Installation
@@ -33,10 +34,34 @@
 
 3. Edit `config.json` with your repositories and build commands.
 
-4. Run `fetchd`:
+4. Run `fetchd` on demand:
    ```bash
    python fetchd.py
    ```
+
+## Automated Background Scheduling
+
+You don't need to manually configure cron jobs or Task Scheduler. `fetchd` includes built-in service installation:
+
+### 1. Native Service Installation (Runs Daily by Default)
+To register `fetchd` as a native daily background task on your operating system:
+```bash
+python fetchd.py --install-service
+```
+- **Windows**: Automatically creates a daily task in Windows Task Scheduler.
+- **Linux**: Automatically creates and enables a user `systemd` timer (or `@daily` crontab entry).
+- **macOS**: Automatically creates and loads a `launchd` LaunchAgent.
+
+To remove the background task:
+```bash
+python fetchd.py --uninstall-service
+```
+
+### 2. Continuous Daemon Mode
+To run `fetchd` continuously in a loop (e.g. inside `tmux` or a container):
+```bash
+python fetchd.py --daemon --interval 86400
+```
 
 ## Configuration
 
@@ -79,27 +104,16 @@ Following the **principle of least privilege**, `"env"` defaults to `false`. All
 
 ### GitHub Token (Optional)
 
-To avoid GitHub API rate limits or access private repositories, set the `GITHUB_TOKEN` environment variable:
+GitHub provides **60 free API requests per hour** for unauthenticated requests. For daily syncing of your personal tools, **no token is required**. 
 
+If you are syncing private repositories or wish to increase the rate limit:
 ```bash
 export GITHUB_TOKEN="ghp_yourPersonalAccessToken"
 ```
-
 On Windows (PowerShell):
 ```powershell
 $env:GITHUB_TOKEN="ghp_yourPersonalAccessToken"
 ```
-
-## Automating with Cron / Scheduled Tasks
-
-### Linux / macOS (cron)
-Add a cron job to sync your tools hourly:
-```bash
-0 * * * * /usr/bin/python3 /path/to/fetchd/fetchd.py >> /path/to/fetchd/fetchd.log 2>&1
-```
-
-### Windows (Task Scheduler)
-Create a task in Task Scheduler to run `python.exe fetchd.py` at your desired interval.
 
 ## License
 

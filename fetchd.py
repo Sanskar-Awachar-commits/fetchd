@@ -2,7 +2,9 @@
 import os
 import sys
 import json
+import time
 import shutil
+import argparse
 import platform
 import subprocess
 import tempfile
@@ -229,7 +231,145 @@ def update_env(install_dir: Path, projects: list, os_key: str):
     print(f"\n[v] Synced paths to {ENV_PATH}")
 
 
-def main():
+def install_service():
+    os_key = detect_platform_keyword()
+    script_path = Path(__file__).resolve()
+    python_exec = sys.executable
+
+    if os_key == "windows":
+        cmd = f'"{python_exec}" "{script_path}"'
+        try:
+            subprocess.run(
+                ["schtasks", "/Create", "/TN", "fetchd", "/TR", cmd, "/SC", "DAILY", "/F"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            print("[+] Successfully registered 'fetchd' in Windows Task Scheduler (Daily).")
+        except subprocess.CalledProcessError as e:
+            print(f"[-] Failed to register task: {e.stderr.strip() if e.stderr else e}")
+
+    elif os_key == "macos":
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.sanskar.fetchd.plist"
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
+        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sanskar.fetchd</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python_exec}</string>
+        <string>{script_path}</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>86400</integer>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+"""
+        with open(plist_path, "w") as f:
+            f.write(plist_content)
+        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        subprocess.run(["launchctl", "load", str(plist_path)], check=True)
+        print(f"[+] Successfully installed and loaded LaunchAgent at {plist_path} (Daily).")
+
+    elif os_key == "linux":
+        systemd_user_dir = Path.home() / ".config" / "systemd" / "user"
+        if shutil.which("systemctl"):
+            systemd_user_dir.mkdir(parents=True, exist_ok=True)
+            service_file = systemd_user_dir / "fetchd.service"
+            timer_file = systemd_user_dir / "fetchd.timer"
+
+            service_content = f"""[Unit]
+Description=fetchd background tool sync service
+
+[Service]
+Type=oneshot
+ExecStart={python_exec} {script_path}
+"""
+            timer_content = """[Unit]
+Description=Run fetchd daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+            with open(service_file, "w") as f:
+                f.write(service_content)
+            with open(timer_file, "w") as f:
+                f.write(timer_content)
+
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+            subprocess.run(["systemctl", "--user", "enable", "--now", "fetchd.timer"], check=True)
+            print("[+] Successfully installed and started systemd user timer 'fetchd.timer' (Daily).")
+        else:
+            cron_entry = f"@daily {python_exec} {script_path} >/dev/null 2>&1\n"
+            try:
+                res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+                existing_cron = res.stdout if res.returncode == 0 else ""
+                if str(script_path) not in existing_cron:
+                    new_cron = existing_cron + cron_entry
+                    subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
+                    print("[+] Added @daily entry to user crontab.")
+                else:
+                    print("[+] fetchd is already configured in crontab.")
+            except Exception as e:
+                print(f"[-] Failed to add crontab entry: {e}")
+
+
+def uninstall_service():
+    os_key = detect_platform_keyword()
+    script_path = Path(__file__).resolve()
+
+    if os_key == "windows":
+        try:
+            subprocess.run(["schtasks", "/Delete", "/TN", "fetchd", "/F"], check=True, capture_output=True)
+            print("[+] Successfully removed 'fetchd' from Windows Task Scheduler.")
+        except subprocess.CalledProcessError as e:
+            print(f"[-] Task not found or failed to delete: {e.stderr.strip() if e.stderr else e}")
+
+    elif os_key == "macos":
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.sanskar.fetchd.plist"
+        if plist_path.exists():
+            subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+            plist_path.unlink()
+            print("[+] Successfully uninstalled and deleted LaunchAgent.")
+        else:
+            print("[-] No LaunchAgent found for fetchd.")
+
+    elif os_key == "linux":
+        systemd_user_dir = Path.home() / ".config" / "systemd" / "user"
+        timer_file = systemd_user_dir / "fetchd.timer"
+        service_file = systemd_user_dir / "fetchd.service"
+
+        if shutil.which("systemctl") and timer_file.exists():
+            subprocess.run(["systemctl", "--user", "disable", "--now", "fetchd.timer"], capture_output=True)
+            if timer_file.exists():
+                timer_file.unlink()
+            if service_file.exists():
+                service_file.unlink()
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            print("[+] Successfully disabled and removed systemd timer and service.")
+        else:
+            try:
+                res = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+                if res.returncode == 0 and str(script_path) in res.stdout:
+                    filtered = "\n".join(line for line in res.stdout.splitlines() if str(script_path) not in line) + "\n"
+                    subprocess.run(["crontab", "-"], input=filtered, text=True, check=True)
+                    print("[+] Removed fetchd from crontab.")
+                else:
+                    print("[-] No fetchd entry found in crontab.")
+            except Exception as e:
+                print(f"[-] Error removing crontab entry: {e}")
+
+
+def run_sync():
     _lock = acquire_lock()
 
     if not CONFIG_PATH.exists():
@@ -260,6 +400,48 @@ def main():
         sync_project(item, install_dir, os_key, token)
 
     update_env(install_dir, projects, os_key)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="fetchd",
+        description="Lightweight auto-sync daemon for personal CLI utilities and GitHub release binaries."
+    )
+    parser.add_argument(
+        "--daemon", "-d",
+        action="store_true",
+        help="Run continuously in daemon mode."
+    )
+    parser.add_argument(
+        "--interval", "-i",
+        type=int,
+        default=86400,
+        help="Interval in seconds for daemon mode (default: 86400 / 1 day)."
+    )
+    parser.add_argument(
+        "--install-service",
+        action="store_true",
+        help="Install fetchd as a native background scheduled task (daily)."
+    )
+    parser.add_argument(
+        "--uninstall-service",
+        action="store_true",
+        help="Uninstall the background scheduled task."
+    )
+
+    args = parser.parse_args()
+
+    if args.install_service:
+        install_service()
+    elif args.uninstall_service:
+        uninstall_service()
+    elif args.daemon:
+        print(f"[fetchd] Starting daemon mode (Interval: {args.interval}s)...")
+        while True:
+            run_sync()
+            time.sleep(args.interval)
+    else:
+        run_sync()
 
 
 if __name__ == "__main__":
