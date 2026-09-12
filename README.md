@@ -15,6 +15,7 @@ Lightweight background utility to sync personal CLI tools and GitHub release bin
 - Non-blocking lock to prevent overlapping runs
 - Native background scheduler setup (Windows Task Scheduler, macOS launchd, Linux systemd/cron)
 - Whitelist (`env`) to control which tools are added to PATH and `.env`
+- Project helper (`--add`) to inspect any repository and generate its configuration snippet
 
 ---
 
@@ -56,6 +57,12 @@ fetchd
 
 # Print version
 fetchd --version
+
+# Inspect current project and generate fetchd config snippet
+fetchd --add
+
+# Inspect and automatically append to config.json
+fetchd --add --save
 
 # Install daily background service
 fetchd --install-service

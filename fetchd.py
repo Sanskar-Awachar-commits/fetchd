@@ -375,6 +375,85 @@ def uninstall_service():
                 print(f"[-] Error removing crontab entry: {e}")
 
 
+def add_project_wizard(save=False, env_flag=None):
+    cwd = Path.cwd()
+    repo = None
+
+    try:
+        remote_out = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            check=True
+        ).stdout.strip()
+        if "github.com" in remote_out:
+            if remote_out.endswith(".git"):
+                remote_out = remote_out[:-4]
+            if ":" in remote_out and not remote_out.startswith("http"):
+                repo = remote_out.split(":")[-1]
+            elif "github.com/" in remote_out:
+                repo = remote_out.split("github.com/")[-1]
+    except Exception:
+        pass
+
+    if not repo:
+        repo = f"Sanskar-Awachar-commits/{cwd.name}"
+
+    binary_name = cwd.name
+    build_cmd = None
+
+    if (cwd / "Cargo.toml").exists():
+        build_cmd = f"cargo build --release && cp target/release/{binary_name} ."
+    elif (cwd / "go.mod").exists():
+        build_cmd = f"go build -o {binary_name} ."
+    elif (cwd / f"{binary_name}.cpp").exists():
+        build_cmd = f"g++ -O3 -std=c++20 {binary_name}.cpp -o {binary_name}"
+    elif (cwd / "main.cpp").exists():
+        build_cmd = f"g++ -O3 -std=c++20 main.cpp -o {binary_name}"
+    elif (cwd / f"{binary_name}.py").exists():
+        build_cmd = f"pyinstaller --onefile --name {binary_name} {binary_name}.py && cp dist/{binary_name} ."
+    elif (cwd / "main.py").exists():
+        build_cmd = f"pyinstaller --onefile --name {binary_name} main.py && cp dist/{binary_name} ."
+
+    if env_flag is not None:
+        is_env = env_flag
+    else:
+        try:
+            choice = input(f"Add '{binary_name}' to PATH / .env whitelist? [y/N]: ").strip().lower()
+            is_env = choice in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            is_env = False
+
+    entry = {
+        "repo": repo,
+        "binary_name": binary_name,
+        "env": is_env
+    }
+    if build_cmd:
+        entry["build_command"] = build_cmd
+
+    print("\n[fetchd] Generated project configuration snippet:\n")
+    print(json.dumps(entry, indent=2))
+
+    if save:
+        if not CONFIG_PATH.exists() and EXAMPLE_CONFIG_PATH.exists():
+            shutil.copy(EXAMPLE_CONFIG_PATH, CONFIG_PATH)
+
+        if CONFIG_PATH.exists():
+            try:
+                with open(CONFIG_PATH, "r") as f:
+                    cfg = json.load(f)
+                projects = cfg.setdefault("projects", [])
+                projects = [p for p in projects if p.get("repo") != repo]
+                projects.append(entry)
+                cfg["projects"] = projects
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump(cfg, f, indent=2)
+                print(f"\n[+] Successfully saved to {CONFIG_PATH}")
+            except Exception as e:
+                print(f"\n[-] Failed to save to {CONFIG_PATH}: {e}")
+
+
 def run_sync():
     _lock = acquire_lock()
 
@@ -439,10 +518,35 @@ def main():
         action="store_true",
         help="Uninstall native background service."
     )
+    parser.add_argument(
+        "--add",
+        action="store_true",
+        help="Inspect current project directory and generate a fetchd config snippet."
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Automatically append/update current project in config.json (used with --add)."
+    )
+    parser.add_argument(
+        "--env",
+        dest="env_flag",
+        action="store_true",
+        default=None,
+        help="Enable env whitelist for current project (used with --add)."
+    )
+    parser.add_argument(
+        "--no-env",
+        dest="env_flag",
+        action="store_false",
+        help="Disable env whitelist for current project (used with --add)."
+    )
 
     args = parser.parse_args()
 
-    if args.install_service:
+    if args.add:
+        add_project_wizard(save=args.save, env_flag=args.env_flag)
+    elif args.install_service:
         install_service()
     elif args.uninstall_service:
         uninstall_service()
