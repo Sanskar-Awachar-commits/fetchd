@@ -11,6 +11,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+__version__ = "1.0.0"
+
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
     EXEC_ARGS = [str(Path(sys.executable).resolve())]
@@ -410,6 +412,11 @@ def main():
     parser = argparse.ArgumentParser(
         prog="fetchd",
         description="Sync CLI utilities and GitHub release binaries."
+    )
+    parser.add_argument(
+        "--version", "-v",
+        action="version",
+        version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
         "--daemon", "-d",

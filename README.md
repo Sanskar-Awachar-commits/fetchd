@@ -1,5 +1,10 @@
 # fetchd
 
+[![GitHub Release](https://img.shields.io/github/v/release/Sanskar-Awachar-commits/fetchd?style=flat-square&color=blue)](https://github.com/Sanskar-Awachar-commits/fetchd/releases/latest)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Sanskar-Awachar-commits/fetchd/release.yml?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/actions)
+[![License](https://img.shields.io/github/license/Sanskar-Awachar-commits/fetchd?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
+
 Lightweight background utility to sync personal CLI tools and GitHub release binaries across machines.
 
 ## Features
@@ -48,6 +53,9 @@ python fetchd.py
 ```bash
 # Run sync once
 fetchd
+
+# Print version
+fetchd --version
 
 # Install daily background service
 fetchd --install-service
