@@ -22,19 +22,44 @@ else:
     EXEC_ARGS = [sys.executable, str(Path(__file__).resolve())]
     EXEC_CMD = f'"{sys.executable}" "{Path(__file__).resolve()}"'
 
-CONFIG_PATH = BASE_DIR / "config.json"
+CONFIG_DIR = Path.home() / ".fetchd"
+DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.json"
+DEFAULT_ENV_PATH = CONFIG_DIR / ".env"
+DEFAULT_LOCK_PATH = CONFIG_DIR / "fetchd.lock"
 EXAMPLE_CONFIG_PATH = BASE_DIR / "config.example.json"
-ENV_PATH = BASE_DIR / ".env"
-LOCK_PATH = BASE_DIR / "fetchd.lock"
+
+DEFAULT_CONFIG = {
+    "install_dir": "~/programs",
+    "projects": [
+        {
+            "repo": "Sanskar-Awachar-commits/fetchd",
+            "binary_name": "fetchd",
+            "env": True,
+            "build_command": "pyinstaller --onefile --name fetchd fetchd.py && cp dist/fetchd ."
+        }
+    ]
+}
 
 
-def acquire_lock():
-    lock_file = open(LOCK_PATH, "a+")
+def resolve_config_path(custom_path: str = None) -> Path:
+    if custom_path:
+        return Path(custom_path).expanduser().resolve()
+    env_config = os.getenv("FETCHD_CONFIG")
+    if env_config:
+        return Path(env_config).expanduser().resolve()
+    return DEFAULT_CONFIG_PATH
+
+
+def acquire_lock(lock_path: Path = None):
+    if lock_path is None:
+        lock_path = DEFAULT_LOCK_PATH
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(lock_path, "a+")
     if platform.system().lower() == "windows":
         import msvcrt
         try:
             lock_file.seek(0)
-            if LOCK_PATH.stat().st_size == 0:
+            if lock_path.stat().st_size == 0:
                 lock_file.write("0")
                 lock_file.flush()
             lock_file.seek(0)
@@ -205,7 +230,10 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
                 pass
 
 
-def update_env(install_dir: Path, projects: list, os_key: str):
+def update_env(install_dir: Path, projects: list, os_key: str, env_path: Path = None):
+    if env_path is None:
+        env_path = DEFAULT_ENV_PATH
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     resolved = install_dir.resolve()
     bin_dir = (install_dir / "bin").resolve()
     is_win = os_key == "windows"
@@ -235,10 +263,10 @@ def update_env(install_dir: Path, projects: list, os_key: str):
         env_lines.append("\n")
         env_lines.extend(whitelisted_vars)
 
-    with open(ENV_PATH, "w") as f:
+    with open(env_path, "w") as f:
         f.writelines(env_lines)
 
-    print(f"\n[v] Synced paths to {ENV_PATH}")
+    print(f"\n[v] Synced paths to {env_path}")
 
 
 def install_service():
@@ -375,7 +403,9 @@ def uninstall_service():
                 print(f"[-] Error removing crontab entry: {e}")
 
 
-def add_project_wizard(save=False, env_flag=None):
+def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: bool = None):
+    if config_path is None:
+        config_path = resolve_config_path()
     cwd = Path.cwd()
     repo = None
 
@@ -436,42 +466,59 @@ def add_project_wizard(save=False, env_flag=None):
     print(json.dumps(entry, indent=2))
 
     if save:
-        if not CONFIG_PATH.exists() and EXAMPLE_CONFIG_PATH.exists():
-            shutil.copy(EXAMPLE_CONFIG_PATH, CONFIG_PATH)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if not config_path.exists():
+            if EXAMPLE_CONFIG_PATH.exists():
+                shutil.copy(EXAMPLE_CONFIG_PATH, config_path)
+            elif (BASE_DIR / "config.json").exists() and (BASE_DIR / "config.json") != config_path:
+                shutil.copy(BASE_DIR / "config.json", config_path)
+            else:
+                with open(config_path, "w") as f:
+                    json.dump(DEFAULT_CONFIG, f, indent=2)
 
-        if CONFIG_PATH.exists():
-            try:
-                with open(CONFIG_PATH, "r") as f:
-                    cfg = json.load(f)
-                projects = cfg.setdefault("projects", [])
-                projects = [p for p in projects if p.get("repo") != repo]
-                projects.append(entry)
-                cfg["projects"] = projects
-                with open(CONFIG_PATH, "w") as f:
-                    json.dump(cfg, f, indent=2)
-                print(f"\n[+] Successfully saved to {CONFIG_PATH}")
-            except Exception as e:
-                print(f"\n[-] Failed to save to {CONFIG_PATH}: {e}")
+        try:
+            with open(config_path, "r") as f:
+                cfg = json.load(f)
+            projects = cfg.setdefault("projects", [])
+            projects = [p for p in projects if p.get("repo") != repo]
+            projects.append(entry)
+            cfg["projects"] = projects
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+            print(f"\n[+] Successfully saved to {config_path}")
+        except Exception as e:
+            print(f"\n[-] Failed to save to {config_path}: {e}")
 
 
-def run_sync():
-    _lock = acquire_lock()
+def run_sync(config_path: Path = None):
+    if config_path is None:
+        config_path = resolve_config_path()
 
-    if not CONFIG_PATH.exists():
+    lock_path = config_path.parent / "fetchd.lock"
+    _lock = acquire_lock(lock_path)
+
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         if EXAMPLE_CONFIG_PATH.exists():
-            shutil.copy(EXAMPLE_CONFIG_PATH, CONFIG_PATH)
-            print(f"[fetchd] Created {CONFIG_PATH.name} from {EXAMPLE_CONFIG_PATH.name}.")
-            print(f"[fetchd] Please edit {CONFIG_PATH.name} to configure your repositories and rerun.")
+            shutil.copy(EXAMPLE_CONFIG_PATH, config_path)
+            print(f"[fetchd] Initialized configuration at {config_path} from {EXAMPLE_CONFIG_PATH.name}.")
+            print(f"[fetchd] Please edit {config_path} to configure your repositories and rerun.")
             sys.exit(0)
+        elif (BASE_DIR / "config.json").exists() and (BASE_DIR / "config.json") != config_path:
+            shutil.copy(BASE_DIR / "config.json", config_path)
+            print(f"[fetchd] Initialized configuration at {config_path} from existing local config.")
         else:
-            print(f"Error: Missing config at {CONFIG_PATH}")
-            sys.exit(1)
+            with open(config_path, "w") as f:
+                json.dump(DEFAULT_CONFIG, f, indent=2)
+            print(f"[fetchd] Initialized new configuration at {config_path}.")
+            print(f"[fetchd] Please edit {config_path} to configure your repositories and rerun.")
+            sys.exit(0)
 
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(config_path, "r") as f:
             config = json.load(f)
     except json.JSONDecodeError as e:
-        print(f"Error reading {CONFIG_PATH}: {e}")
+        print(f"Error reading {config_path}: {e}")
         sys.exit(1)
 
     install_dir = Path(os.path.expanduser(config.get("install_dir", "~/programs")))
@@ -484,7 +531,8 @@ def run_sync():
     for item in projects:
         sync_project(item, install_dir, os_key, token)
 
-    update_env(install_dir, projects, os_key)
+    env_path = config_path.parent / ".env"
+    update_env(install_dir, projects, os_key, env_path=env_path)
 
 
 def main():
@@ -496,6 +544,12 @@ def main():
         "--version", "-v",
         action="version",
         version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "--config", "-c",
+        type=str,
+        default=None,
+        help="Path to config.json (default: ~/.fetchd/config.json)."
     )
     parser.add_argument(
         "--daemon", "-d",
@@ -543,9 +597,10 @@ def main():
     )
 
     args = parser.parse_args()
+    config_path = resolve_config_path(args.config)
 
     if args.add:
-        add_project_wizard(save=args.save, env_flag=args.env_flag)
+        add_project_wizard(config_path=config_path, save=args.save, env_flag=args.env_flag)
     elif args.install_service:
         install_service()
     elif args.uninstall_service:
@@ -553,10 +608,10 @@ def main():
     elif args.daemon:
         print(f"[fetchd] Daemon started (interval: {args.interval}s)")
         while True:
-            run_sync()
+            run_sync(config_path=config_path)
             time.sleep(args.interval)
     else:
-        run_sync()
+        run_sync(config_path=config_path)
 
 
 if __name__ == "__main__":

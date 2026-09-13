@@ -52,8 +52,11 @@ python fetchd.py
 ## Usage
 
 ```bash
-# Run sync once
+# Run sync once (uses ~/.fetchd/config.json)
 fetchd
+
+# Run sync with custom config file
+fetchd --config /path/to/config.json
 
 # Print version
 fetchd --version
@@ -61,7 +64,7 @@ fetchd --version
 # Inspect current project and generate fetchd config snippet
 fetchd --add
 
-# Inspect and automatically append to config.json
+# Inspect and automatically append to ~/.fetchd/config.json
 fetchd --add --save
 
 # Install daily background service
@@ -78,7 +81,11 @@ fetchd --daemon --interval 86400
 
 ## Configuration
 
-On first run, `fetchd` creates `config.json` from `config.example.json`:
+Configuration is stored at `~/.fetchd/config.json` (`%USERPROFILE%\.fetchd\config.json` on Windows).
+
+You can override the config location with `--config <path>` or the `FETCHD_CONFIG` environment variable.
+
+On first run, `fetchd` automatically creates `~/.fetchd/config.json`:
 
 ```json
 {
@@ -108,7 +115,7 @@ On first run, `fetchd` creates `config.json` from `config.example.json`:
 | `projects` | list | `[]` | List of repositories to sync. |
 | `projects[].repo` | string | *required* | `owner/repo` path on GitHub. |
 | `projects[].binary_name` | string | *required* | Target executable name (`.exe` added automatically on Windows). |
-| `projects[].env` | boolean | `false` | When `true`, links binary to `install_dir/bin` and exports to `.env` / `PATH`. |
+| `projects[].env` | boolean | `false` | When `true`, links binary to `install_dir/bin` and exports to `~/.fetchd/.env` / `PATH`. |
 | `projects[].build_command` | string | `null` | Build command to run if no release binary is found. |
 
 ---
