@@ -9,9 +9,10 @@ import platform
 import subprocess
 import tempfile
 import urllib.request
+import urllib.error
 from pathlib import Path
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -24,6 +25,7 @@ else:
 
 CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / "fetchd"
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.json"
+DEFAULT_STATE_PATH = CONFIG_DIR / "state.json"
 DEFAULT_ENV_PATH = CONFIG_DIR / ".env"
 DEFAULT_LOCK_PATH = CONFIG_DIR / "fetchd.lock"
 EXAMPLE_CONFIG_PATH = BASE_DIR / "config.example.json"
@@ -40,6 +42,29 @@ DEFAULT_CONFIG = {
         }
     ]
 }
+
+
+def load_state(state_path: Path = None) -> dict:
+    if state_path is None:
+        state_path = DEFAULT_STATE_PATH
+    if state_path.exists():
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_state(state: dict, state_path: Path = None):
+    if state_path is None:
+        state_path = DEFAULT_STATE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
 
 
 def resolve_config_path(custom_path: str = None) -> Path:
@@ -195,7 +220,7 @@ def cleanup_lingering_files(install_dir: Path):
                     pass
 
 
-def sync_project(item, install_dir: Path, os_key: str, token=None):
+def sync_project(item, install_dir: Path, os_key: str, state: dict = None, force: bool = False, token=None):
     repo = item.get("repo")
     bin_name = item.get("binary_name")
     build_cmd = item.get("build_command")
@@ -235,11 +260,13 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
     temp_download_path = target_path.with_name(f"{bin_name}.tmp")
     print(f"\n[+] Checking {repo}...")
 
+    repo_state = state.get(repo, {}) if state is not None else {}
     release_url = f"https://api.github.com/repos/{repo}/releases/latest"
     binary_found = False
 
     try:
         data = fetch_json(release_url, token)
+        tag_name = data.get("tag_name") or data.get("name")
         assets = data.get("assets", [])
 
         for asset in assets:
@@ -261,9 +288,27 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
                     is_match = True
 
             if is_match:
+                asset_id = asset.get("id")
+                asset_updated = asset.get("updated_at")
+
+                if (
+                    not force
+                    and target_path.exists()
+                    and repo_state.get("target_path") == str(target_path)
+                    and (
+                        (tag_name and repo_state.get("tag") == tag_name)
+                        or (asset_id and repo_state.get("asset_id") == asset_id)
+                        or (asset_updated and repo_state.get("asset_updated_at") == asset_updated)
+                    )
+                ):
+                    print(f"    [OK] Up to date ({tag_name or 'latest'}).")
+                    binary_found = True
+                    break
+
                 download_url = asset["browser_download_url"]
-                print(f"    Found release asset: {asset['name']}. Downloading...")
+                print(f"    Found release asset: {asset['name']} ({tag_name or 'latest'}). Downloading...")
                 is_archive = any(asset['name'].lower().endswith(ext) for ext in [".zip", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2"])
+                installed = False
                 if is_archive:
                     temp_archive = target_path.with_name(f"archive_{asset['name']}")
                     download_file(download_url, temp_archive, token)
@@ -275,17 +320,35 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
                             pass
                     if extracted and temp_download_path.exists():
                         atomic_replace_binary(target_path, temp_download_path)
-                        binary_found = True
+                        installed = True
                         print(f"    [OK] Extracted and installed {bin_name} to {dest_label}")
-                        break
                     else:
                         print(f"    [-] Could not extract '{bin_name}' from archive.")
                 else:
                     download_file(download_url, temp_download_path, token)
                     atomic_replace_binary(target_path, temp_download_path)
-                    binary_found = True
+                    installed = True
                     print(f"    [OK] Installed {bin_name} to {dest_label}")
+
+                if installed:
+                    if state is not None:
+                        state[repo] = {
+                            "tag": tag_name,
+                            "asset_name": asset.get("name"),
+                            "asset_id": asset_id,
+                            "asset_updated_at": asset_updated,
+                            "target_path": str(target_path),
+                            "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        }
+                    binary_found = True
                     break
+    except urllib.error.HTTPError as e:
+        if e.code == 403 or e.code == 429:
+            print("    [!] GitHub API rate limit reached. (Set GITHUB_TOKEN to increase limit to 5000 req/hr)")
+            if target_path.exists() and not force:
+                print(f"    [i] Existing local binary {bin_name} found. Keeping current version.")
+                return
+        print("    No prebuilt release matching OS or API limited. Trying source build...")
     except Exception:
         print("    No prebuilt release matching OS or API limited. Trying source build...")
 
@@ -293,6 +356,26 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
         if not build_cmd:
             print(f"    [-] No prebuilt binary found and no build_command provided for {repo}. Skipping.")
             return
+
+        remote_sha = None
+        if not force and target_path.exists():
+            try:
+                res = subprocess.run(
+                    ["git", "ls-remote", f"https://github.com/{repo}.git", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    remote_sha = res.stdout.strip().split()[0]
+                    if (
+                        repo_state.get("commit_sha") == remote_sha
+                        and repo_state.get("target_path") == str(target_path)
+                    ):
+                        print(f"    [OK] Up to date (commit {remote_sha[:7]}).")
+                        return
+            except Exception:
+                pass
 
         print(f"    Compiling from source: {build_cmd}")
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -308,6 +391,24 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
                 built_bin = repo_dir / bin_name
                 if built_bin.exists():
                     atomic_replace_binary(target_path, built_bin)
+                    if not remote_sha:
+                        try:
+                            res = subprocess.run(
+                                ["git", "rev-parse", "HEAD"],
+                                cwd=repo_dir,
+                                capture_output=True,
+                                text=True
+                            )
+                            if res.returncode == 0:
+                                remote_sha = res.stdout.strip()
+                        except Exception:
+                            pass
+                    if state is not None:
+                        state[repo] = {
+                            "commit_sha": remote_sha,
+                            "target_path": str(target_path),
+                            "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        }
                     binary_found = True
                     print(f"    [OK] Built and installed {bin_name} to {dest_label}")
                 else:
@@ -644,12 +745,14 @@ def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: b
             print(f"\n[-] Failed to save to {config_path}: {e}")
 
 
-def run_sync(config_path: Path = None):
+def run_sync(config_path: Path = None, force: bool = False):
     if config_path is None:
         config_path = resolve_config_path()
 
     lock_path = config_path.parent / "fetchd.lock"
     _lock = acquire_lock(lock_path)
+    state_path = config_path.parent / "state.json"
+    state = load_state(state_path)
 
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -688,7 +791,8 @@ def run_sync(config_path: Path = None):
     cleanup_lingering_files(install_dir)
 
     for item in projects:
-        sync_project(item, install_dir, os_key, token)
+        sync_project(item, install_dir, os_key, state=state, force=force, token=token)
+        save_state(state, state_path)
 
     env_path = config_path.parent / ".env"
     update_env(install_dir, projects, os_key, env_path=env_path)
@@ -710,6 +814,11 @@ def main():
         type=str,
         default=None,
         help="Path to config.json (default: ~/.config/fetchd/config.json)."
+    )
+    parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Force download or rebuild of all projects even if already up to date."
     )
     parser.add_argument(
         "--daemon", "-d",
@@ -768,10 +877,10 @@ def main():
     elif args.daemon:
         print(f"[fetchd] Daemon started (interval: {args.interval}s)")
         while True:
-            run_sync(config_path=config_path)
+            run_sync(config_path=config_path, force=args.force)
             time.sleep(args.interval)
     else:
-        run_sync(config_path=config_path)
+        run_sync(config_path=config_path, force=args.force)
 
 
 if __name__ == "__main__":

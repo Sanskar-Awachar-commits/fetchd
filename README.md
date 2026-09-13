@@ -1,6 +1,6 @@
 # fetchd
 
-[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
+[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
 [![Build Status](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml/badge.svg)](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
@@ -11,6 +11,7 @@ Lightweight background utility to sync personal CLI tools and GitHub release bin
 
 - Downloads latest precompiled binaries from GitHub Releases
 - Automatic fallback to git clone & source build if release binary is missing
+- Smart state tracking (`~/.config/fetchd/state.json`) to skip already up-to-date binaries and avoid redundant downloads
 - Safe in-place binary replacement (supports active executables on Windows/POSIX)
 - Non-blocking lock to prevent overlapping runs
 - Native background scheduler setup (Windows Task Scheduler, macOS launchd, Linux systemd/cron)
@@ -54,6 +55,9 @@ python fetchd.py
 ```bash
 # Run sync once (uses ~/.config/fetchd/config.json)
 fetchd
+
+# Force download/rebuild even if binaries are already up to date
+fetchd --force
 
 # Run sync with custom config file
 fetchd --config /path/to/config.json
