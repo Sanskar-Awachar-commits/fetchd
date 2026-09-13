@@ -11,7 +11,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -103,8 +103,47 @@ def download_file(url, dest_path: Path, token=None):
         shutil.copyfileobj(resp, out)
 
 
+def extract_binary_from_archive(archive_path: Path, bin_name: str, dest_binary: Path) -> bool:
+    import zipfile
+    import tarfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        extract_dir = Path(tmpdir)
+        try:
+            if zipfile.is_zipfile(archive_path):
+                with zipfile.ZipFile(archive_path, 'r') as z:
+                    z.extractall(extract_dir)
+            elif tarfile.is_tarfile(archive_path):
+                with tarfile.open(archive_path, 'r:*') as t:
+                    t.extractall(extract_dir)
+            else:
+                return False
+        except Exception:
+            return False
+
+        candidates = [c for c in extract_dir.rglob("*") if c.is_file()]
+        for c in candidates:
+            if c.name.lower() == bin_name.lower():
+                shutil.copy2(c, dest_binary)
+                return True
+
+        stem_target = bin_name.lower().replace(".exe", "").replace("-", "").replace("_", "")
+        for c in candidates:
+            c_stem = c.name.lower().replace(".exe", "").replace("-", "").replace("_", "")
+            if c_stem == stem_target or (len(stem_target) > 3 and stem_target in c_stem):
+                shutil.copy2(c, dest_binary)
+                return True
+
+        exe_files = [c for c in candidates if c.suffix.lower() == ".exe" or os.access(c, os.X_OK)]
+        if len(exe_files) == 1:
+            shutil.copy2(exe_files[0], dest_binary)
+            return True
+
+    return False
+
+
 def atomic_replace_binary(target_path: Path, new_binary_path: Path):
     target_path = target_path.resolve()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     old_backup = target_path.with_name(f"{target_path.name}.old")
 
     if old_backup.exists():
@@ -118,9 +157,17 @@ def atomic_replace_binary(target_path: Path, new_binary_path: Path):
             if target_path.exists():
                 target_path.rename(old_backup)
             shutil.move(str(new_binary_path), str(target_path))
+            if old_backup.exists():
+                try:
+                    old_backup.unlink()
+                except OSError:
+                    pass
         except Exception as e:
             if old_backup.exists() and not target_path.exists():
-                old_backup.rename(target_path)
+                try:
+                    old_backup.rename(target_path)
+                except OSError:
+                    pass
             raise RuntimeError(f"Failed to replace {target_path.name}: {e}")
     else:
         temp_target = target_path.with_name(f".{target_path.name}.tmp")
@@ -133,6 +180,19 @@ def atomic_replace_binary(target_path: Path, new_binary_path: Path):
                     pass
         temp_target.chmod(0o755)
         os.replace(temp_target, target_path)
+
+
+def cleanup_lingering_files(install_dir: Path):
+    dirs = [install_dir, install_dir / "bin"]
+    for d in dirs:
+        if not d.exists():
+            continue
+        for p in d.iterdir():
+            if p.is_file() and (p.name.endswith(".old") or p.name.endswith(".tmp") or (p.name.startswith(".") and not p.name == ".env")):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
 
 def sync_project(item, install_dir: Path, os_key: str, token=None):
@@ -149,9 +209,30 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
         bin_name += ".exe"
 
     bin_dir = install_dir / "bin"
-    target_path = install_dir / bin_name
-    whitelisted_bin_path = bin_dir / bin_name
-    temp_download_path = install_dir / f"{bin_name}.tmp"
+    if enable_env:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        target_path = bin_dir / bin_name
+        dest_label = f"{install_dir.name}/bin"
+        other_path = install_dir / bin_name
+    else:
+        target_path = install_dir / bin_name
+        dest_label = install_dir.name
+        other_path = bin_dir / bin_name
+
+    # Remove any misplaced duplicate from the other folder
+    if other_path.exists():
+        try:
+            other_path.unlink()
+        except OSError:
+            pass
+    other_old = other_path.with_name(f"{other_path.name}.old")
+    if other_old.exists():
+        try:
+            other_old.unlink()
+        except OSError:
+            pass
+
+    temp_download_path = target_path.with_name(f"{bin_name}.tmp")
     print(f"\n[+] Checking {repo}...")
 
     release_url = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -182,11 +263,29 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
             if is_match:
                 download_url = asset["browser_download_url"]
                 print(f"    Found release asset: {asset['name']}. Downloading...")
-                download_file(download_url, temp_download_path, token)
-                atomic_replace_binary(target_path, temp_download_path)
-                binary_found = True
-                print(f"    [OK] Installed {bin_name} to {install_dir}")
-                break
+                is_archive = any(asset['name'].lower().endswith(ext) for ext in [".zip", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2"])
+                if is_archive:
+                    temp_archive = target_path.with_name(f"archive_{asset['name']}")
+                    download_file(download_url, temp_archive, token)
+                    extracted = extract_binary_from_archive(temp_archive, bin_name, temp_download_path)
+                    if temp_archive.exists():
+                        try:
+                            temp_archive.unlink()
+                        except OSError:
+                            pass
+                    if extracted and temp_download_path.exists():
+                        atomic_replace_binary(target_path, temp_download_path)
+                        binary_found = True
+                        print(f"    [OK] Extracted and installed {bin_name} to {dest_label}")
+                        break
+                    else:
+                        print(f"    [-] Could not extract '{bin_name}' from archive.")
+                else:
+                    download_file(download_url, temp_download_path, token)
+                    atomic_replace_binary(target_path, temp_download_path)
+                    binary_found = True
+                    print(f"    [OK] Installed {bin_name} to {dest_label}")
+                    break
     except Exception:
         print("    No prebuilt release matching OS or API limited. Trying source build...")
 
@@ -210,7 +309,7 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
                 if built_bin.exists():
                     atomic_replace_binary(target_path, built_bin)
                     binary_found = True
-                    print(f"    [OK] Built and installed {bin_name} to {install_dir}")
+                    print(f"    [OK] Built and installed {bin_name} to {dest_label}")
                 else:
                     print(f"    [-] Build finished, but expected binary '{bin_name}' was not found.")
             except subprocess.CalledProcessError as e:
@@ -218,17 +317,7 @@ def sync_project(item, install_dir: Path, os_key: str, token=None):
             except Exception as e:
                 print(f"    [-] Error during source compilation: {e}")
 
-    if target_path.exists():
-        if enable_env:
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            temp_bin_target = bin_dir / f"{bin_name}.tmp"
-            shutil.copy2(target_path, temp_bin_target)
-            atomic_replace_binary(whitelisted_bin_path, temp_bin_target)
-        elif whitelisted_bin_path.exists():
-            try:
-                whitelisted_bin_path.unlink()
-            except OSError:
-                pass
+
 
 
 def update_env(install_dir: Path, projects: list, os_key: str, env_path: Path = None):
@@ -268,6 +357,68 @@ def update_env(install_dir: Path, projects: list, os_key: str, env_path: Path = 
         f.writelines(env_lines)
 
     print(f"\n[v] Synced paths to {env_path}")
+    sync_system_environment(install_dir, bin_dir, os_key, env_path)
+
+
+def sync_system_environment(install_dir: Path, bin_dir: Path, os_key: str, env_path: Path):
+    resolved_bin = str(bin_dir.resolve())
+    resolved_install = str(install_dir.resolve())
+
+    if os_key == "windows":
+        import winreg
+        import ctypes
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_ALL_ACCESS) as key:
+                try:
+                    current_path, reg_type = winreg.QueryValueEx(key, "Path")
+                except FileNotFoundError:
+                    current_path, reg_type = "", winreg.REG_EXPAND_SZ
+
+                parts = [p.strip() for p in current_path.split(";") if p.strip()]
+                if not any(p.lower() == resolved_bin.lower() for p in parts):
+                    parts.append(resolved_bin)
+                    new_path = ";".join(parts) + ";"
+                    winreg.SetValueEx(key, "Path", 0, reg_type, new_path)
+                    print(f"[+] Added '{resolved_bin}' to Windows User PATH.")
+
+                winreg.SetValueEx(key, "PROGRAMS_DIR", 0, winreg.REG_SZ, resolved_install)
+
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            res = ctypes.c_ulong()
+            ctypes.windll.user32.SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                "Environment",
+                SMTO_ABORTIFHUNG,
+                5000,
+                ctypes.byref(res)
+            )
+        except Exception as e:
+            print(f"[-] Warning: Failed to update Windows registry environment: {e}")
+    else:
+        home = Path.home()
+        rc_files = [home / ".bashrc", home / ".zshrc", home / ".profile"]
+        path_line = f'export PATH="{resolved_bin}:$PATH"'
+        env_line = f'[ -f "{env_path}" ] && . "{env_path}"'
+
+        for rc in rc_files:
+            if rc.exists():
+                try:
+                    rc_content = rc.read_text(encoding="utf-8")
+                    updates = []
+                    if resolved_bin not in rc_content:
+                        updates.append(path_line)
+                    if str(env_path) not in rc_content:
+                        updates.append(env_line)
+                    if updates:
+                        with open(rc, "a", encoding="utf-8") as f_rc:
+                            f_rc.write("\n# Added by fetchd\n" + "\n".join(updates) + "\n")
+                        print(f"[+] Added fetchd PATH & environment to ~/{rc.name}")
+                except Exception as e:
+                    print(f"[-] Warning: Could not update {rc}: {e}")
 
 
 def install_service():
@@ -534,11 +685,14 @@ def run_sync(config_path: Path = None):
     os_key = detect_platform_keyword()
     projects = config.get("projects", [])
 
+    cleanup_lingering_files(install_dir)
+
     for item in projects:
         sync_project(item, install_dir, os_key, token)
 
     env_path = config_path.parent / ".env"
     update_env(install_dir, projects, os_key, env_path=env_path)
+    cleanup_lingering_files(install_dir)
 
 
 def main():

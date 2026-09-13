@@ -1,6 +1,6 @@
 # fetchd
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
 [![Build Status](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml/badge.svg)](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
