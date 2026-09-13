@@ -22,11 +22,12 @@ else:
     EXEC_ARGS = [sys.executable, str(Path(__file__).resolve())]
     EXEC_CMD = f'"{sys.executable}" "{Path(__file__).resolve()}"'
 
-CONFIG_DIR = Path.home() / ".fetchd"
+CONFIG_DIR = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / "fetchd"
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_ENV_PATH = CONFIG_DIR / ".env"
 DEFAULT_LOCK_PATH = CONFIG_DIR / "fetchd.lock"
 EXAMPLE_CONFIG_PATH = BASE_DIR / "config.example.json"
+LEGACY_CONFIG_PATH = Path.home() / ".fetchd" / "config.json"
 
 DEFAULT_CONFIG = {
     "install_dir": "~/programs",
@@ -468,7 +469,9 @@ def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: b
     if save:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         if not config_path.exists():
-            if EXAMPLE_CONFIG_PATH.exists():
+            if LEGACY_CONFIG_PATH.exists() and config_path == DEFAULT_CONFIG_PATH:
+                shutil.copy(LEGACY_CONFIG_PATH, config_path)
+            elif EXAMPLE_CONFIG_PATH.exists():
                 shutil.copy(EXAMPLE_CONFIG_PATH, config_path)
             elif (BASE_DIR / "config.json").exists() and (BASE_DIR / "config.json") != config_path:
                 shutil.copy(BASE_DIR / "config.json", config_path)
@@ -499,7 +502,10 @@ def run_sync(config_path: Path = None):
 
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        if EXAMPLE_CONFIG_PATH.exists():
+        if LEGACY_CONFIG_PATH.exists() and config_path == DEFAULT_CONFIG_PATH:
+            shutil.copy(LEGACY_CONFIG_PATH, config_path)
+            print(f"[fetchd] Migrated configuration from {LEGACY_CONFIG_PATH} to {config_path}.")
+        elif EXAMPLE_CONFIG_PATH.exists():
             shutil.copy(EXAMPLE_CONFIG_PATH, config_path)
             print(f"[fetchd] Initialized configuration at {config_path} from {EXAMPLE_CONFIG_PATH.name}.")
             print(f"[fetchd] Please edit {config_path} to configure your repositories and rerun.")
@@ -549,7 +555,7 @@ def main():
         "--config", "-c",
         type=str,
         default=None,
-        help="Path to config.json (default: ~/.fetchd/config.json)."
+        help="Path to config.json (default: ~/.config/fetchd/config.json)."
     )
     parser.add_argument(
         "--daemon", "-d",
