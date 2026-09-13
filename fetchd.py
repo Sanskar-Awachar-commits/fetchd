@@ -11,7 +11,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
