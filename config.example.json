@@ -12,6 +12,18 @@
       "binary_name": "example-tool",
       "env": false,
       "build_command": "g++ -O3 -std=c++20 main.cpp -o example-tool"
+    },
+    {
+      "repo": "Sanskar-Awachar-commits/notes-repo",
+      "type": "clone",
+      "target_dir": "~/documents/notes"
+    },
+    {
+      "repo": "Sanskar-Awachar-commits/snippets-repo",
+      "type": "clone",
+      "target_dir": "~/snippets",
+      "rules": "src"
     }
   ]
 }
+

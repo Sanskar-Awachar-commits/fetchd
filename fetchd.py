@@ -12,7 +12,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -421,6 +421,165 @@ def sync_project(item, install_dir: Path, os_key: str, state: dict = None, force
 
 
 
+def sync_clone_project(item: dict, install_dir: Path, state: dict = None, force: bool = False, token=None):
+    repo = item.get("repo")
+    if not repo:
+        print(f"[-] Invalid project entry in config (no 'repo'): {item}. Skipping.")
+        return
+
+    # Determine git URL
+    if repo.startswith("http://") or repo.startswith("https://") or repo.startswith("git@"):
+        git_url = repo
+    else:
+        if token:
+            git_url = f"https://x-access-token:{token}@github.com/{repo}.git"
+        else:
+            git_url = f"https://github.com/{repo}.git"
+
+    repo_name = repo.rstrip("/").split("/")[-1]
+    if repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+
+    # Target directory resolution (supports custom location or defaults to install_dir/repo_name)
+    raw_target = item.get("target_dir") or item.get("dest") or item.get("path") or item.get("destination") or item.get("clone_dir")
+    if raw_target:
+        target_path = Path(os.path.expanduser(raw_target)).resolve()
+    else:
+        target_path = (install_dir / repo_name).resolve()
+
+    branch = item.get("branch") or item.get("ref")
+
+    # Rules / subpath copying (e.g., only sync 'src' folder or docs)
+    rules = item.get("rules", {})
+    src_subpath = None
+    if isinstance(rules, dict):
+        src_subpath = rules.get("src_dir") or rules.get("subdir") or rules.get("subpath") or rules.get("sparse_path") or rules.get("src")
+    elif isinstance(rules, str):
+        src_subpath = rules
+    if not src_subpath:
+        src_subpath = item.get("src_dir") or item.get("subdir") or item.get("subpath") or item.get("sparse_path")
+
+    print(f"\n[+] Checking repository sync for {repo} -> {target_path}...")
+
+    repo_state = state.get(repo, {}) if state is not None else {}
+    remote_sha = None
+
+    # Check remote commit SHA via ls-remote
+    try:
+        ls_args = ["git", "ls-remote", git_url]
+        if branch:
+            ls_args.append(branch)
+        else:
+            ls_args.append("HEAD")
+
+        res = subprocess.run(ls_args, capture_output=True, text=True, timeout=15)
+        if res.returncode == 0 and res.stdout.strip():
+            remote_sha = res.stdout.strip().split()[0]
+    except Exception:
+        pass
+
+    # Check if up to date
+    if not force and target_path.exists():
+        if (
+            remote_sha
+            and repo_state.get("commit_sha") == remote_sha
+            and repo_state.get("target_path") == str(target_path)
+        ):
+            print(f"    [OK] Up to date (commit {remote_sha[:7]}).")
+            return
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if src_subpath:
+            # Clone to temporary directory and copy specified source subfolder/rule to target_path
+            print(f"    Syncing folder rule '{src_subpath}' from {repo}...")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_repo = Path(tmpdir) / "repo"
+                clone_cmd = ["git", "clone", "--depth", "1"]
+                if branch:
+                    clone_cmd.extend(["--branch", branch])
+                clone_cmd.extend([git_url, str(tmp_repo)])
+
+                subprocess.run(clone_cmd, check=True, capture_output=True)
+
+                if not remote_sha:
+                    res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_repo, capture_output=True, text=True)
+                    if res.returncode == 0:
+                        remote_sha = res.stdout.strip()
+
+                source_target = tmp_repo / src_subpath
+                if not source_target.exists():
+                    source_target = tmp_repo / src_subpath.lstrip("/\\")
+
+                if source_target.exists():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    if source_target.is_dir():
+                        shutil.copytree(source_target, target_path, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(source_target, target_path)
+                    print(f"    [OK] Synced '{src_subpath}' to {target_path}")
+                else:
+                    print(f"    [-] Specified rule path '{src_subpath}' not found in repository {repo}.")
+                    return
+        else:
+            # Full repository clone / update
+            if (target_path / ".git").exists():
+                print(f"    Updating local repository at {target_path}...")
+                fetch_args = ["git", "fetch", "--depth", "1", "origin"]
+                if branch:
+                    fetch_args.append(branch)
+                subprocess.run(fetch_args, cwd=target_path, check=True, capture_output=True)
+                reset_target = f"origin/{branch}" if branch else "FETCH_HEAD"
+                subprocess.run(["git", "reset", "--hard", reset_target], cwd=target_path, check=True, capture_output=True)
+                if not remote_sha:
+                    res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target_path, capture_output=True, text=True)
+                    if res.returncode == 0:
+                        remote_sha = res.stdout.strip()
+                print(f"    [OK] Updated repository at {target_path}")
+            else:
+                print(f"    Cloning repository to {target_path}...")
+                if target_path.exists() and any(target_path.iterdir()):
+                    # Target dir exists and is not empty, clone to temp and copy over
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        tmp_repo = Path(tmpdir) / "repo"
+                        clone_cmd = ["git", "clone", "--depth", "1"]
+                        if branch:
+                            clone_cmd.extend(["--branch", branch])
+                        clone_cmd.extend([git_url, str(tmp_repo)])
+                        subprocess.run(clone_cmd, check=True, capture_output=True)
+                        if not remote_sha:
+                            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_repo, capture_output=True, text=True)
+                            if res.returncode == 0:
+                                remote_sha = res.stdout.strip()
+                        shutil.copytree(tmp_repo, target_path, dirs_exist_ok=True)
+                else:
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    clone_cmd = ["git", "clone", "--depth", "1"]
+                    if branch:
+                        clone_cmd.extend(["--branch", branch])
+                    clone_cmd.extend([git_url, str(target_path)])
+                    subprocess.run(clone_cmd, check=True, capture_output=True)
+                    if not remote_sha:
+                        res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target_path, capture_output=True, text=True)
+                        if res.returncode == 0:
+                            remote_sha = res.stdout.strip()
+                print(f"    [OK] Cloned repository to {target_path}")
+
+        if state is not None:
+            state[repo] = {
+                "type": "clone",
+                "commit_sha": remote_sha,
+                "target_path": str(target_path),
+                "synced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            }
+    except subprocess.CalledProcessError as e:
+        err_msg = e.stderr.decode("utf-8", errors="ignore") if isinstance(e.stderr, bytes) else str(e)
+        print(f"    [-] Git sync failed for {repo}: {err_msg.strip()}")
+    except Exception as e:
+        print(f"    [-] Error during repository sync for {repo}: {e}")
+
+
 def update_env(install_dir: Path, projects: list, os_key: str, env_path: Path = None):
     if env_path is None:
         env_path = DEFAULT_ENV_PATH
@@ -438,7 +597,15 @@ def update_env(install_dir: Path, projects: list, os_key: str, env_path: Path = 
         if not item.get("env", False):
             continue
 
+        # Ignore clone/repo projects without executable binary
+        proj_type = str(item.get("type", "")).lower()
+        if proj_type in ["clone", "repo", "src", "git", "source", "dir", "directory"] or item.get("clone") is True:
+            continue
+
         bin_name = item.get("binary_name", "")
+        if not bin_name:
+            continue
+
         if is_win and not bin_name.endswith(".exe"):
             bin_name += ".exe"
 
@@ -656,7 +823,7 @@ def uninstall_service():
                 print(f"[-] Error removing crontab entry: {e}")
 
 
-def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: bool = None):
+def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: bool = None, project_type: str = None, target_dir: str = None, rules: str = None):
     if config_path is None:
         config_path = resolve_config_path()
     cwd = Path.cwd()
@@ -698,22 +865,32 @@ def add_project_wizard(config_path: Path = None, save: bool = False, env_flag: b
     elif (cwd / "main.py").exists():
         build_cmd = f"pyinstaller --onefile --name {binary_name} main.py && cp dist/{binary_name} ."
 
-    if env_flag is not None:
-        is_env = env_flag
+    if project_type == "clone" or (project_type is None and not build_cmd and any(p.suffix.lower() == ".md" for p in cwd.glob("*.md"))):
+        entry = {
+            "repo": repo,
+            "type": "clone"
+        }
+        if target_dir:
+            entry["target_dir"] = target_dir
+        if rules:
+            entry["rules"] = rules
     else:
-        try:
-            choice = input(f"Add '{binary_name}' to PATH / .env whitelist? [y/N]: ").strip().lower()
-            is_env = choice in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            is_env = False
+        if env_flag is not None:
+            is_env = env_flag
+        else:
+            try:
+                choice = input(f"Add '{binary_name}' to PATH / .env whitelist? [y/N]: ").strip().lower()
+                is_env = choice in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                is_env = False
 
-    entry = {
-        "repo": repo,
-        "binary_name": binary_name,
-        "env": is_env
-    }
-    if build_cmd:
-        entry["build_command"] = build_cmd
+        entry = {
+            "repo": repo,
+            "binary_name": binary_name,
+            "env": is_env
+        }
+        if build_cmd:
+            entry["build_command"] = build_cmd
 
     print("\n[fetchd] Generated project configuration snippet:\n")
     print(json.dumps(entry, indent=2))
@@ -791,7 +968,16 @@ def run_sync(config_path: Path = None, force: bool = False):
     cleanup_lingering_files(install_dir)
 
     for item in projects:
-        sync_project(item, install_dir, os_key, state=state, force=force, token=token)
+        proj_type = str(item.get("type", "")).lower()
+        is_clone = (
+            proj_type in ["clone", "repo", "src", "git", "source", "dir", "directory"]
+            or item.get("clone") is True
+            or (not item.get("binary_name") and any(k in item for k in ["target_dir", "dest", "path", "rules", "src_dir", "subdir", "subpath", "sparse_path", "branch"]))
+        )
+        if is_clone:
+            sync_clone_project(item, install_dir, state=state, force=force, token=token)
+        else:
+            sync_project(item, install_dir, os_key, state=state, force=force, token=token)
         save_state(state, state_path)
 
     env_path = config_path.parent / ".env"
@@ -852,6 +1038,27 @@ def main():
         help="Automatically append/update current project in config.json (used with --add)."
     )
     parser.add_argument(
+        "--type",
+        dest="project_type",
+        choices=["binary", "clone"],
+        default=None,
+        help="Project type ('binary' or 'clone') (used with --add)."
+    )
+    parser.add_argument(
+        "--target",
+        dest="target_dir",
+        type=str,
+        default=None,
+        help="Target destination directory (used with --add --type clone)."
+    )
+    parser.add_argument(
+        "--rules",
+        dest="rules",
+        type=str,
+        default=None,
+        help="Subdirectory rule to sync (e.g. 'src' or 'docs') (used with --add --type clone)."
+    )
+    parser.add_argument(
         "--env",
         dest="env_flag",
         action="store_true",
@@ -869,7 +1076,14 @@ def main():
     config_path = resolve_config_path(args.config)
 
     if args.add:
-        add_project_wizard(config_path=config_path, save=args.save, env_flag=args.env_flag)
+        add_project_wizard(
+            config_path=config_path,
+            save=args.save,
+            env_flag=args.env_flag,
+            project_type=args.project_type,
+            target_dir=args.target_dir,
+            rules=args.rules
+        )
     elif args.install_service:
         install_service()
     elif args.uninstall_service:

@@ -1,5 +1,6 @@
 # Local user configuration & runtime files
 config.json
+state.json
 .env
 fetchd.lock
 *.old

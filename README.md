@@ -1,21 +1,22 @@
 # fetchd
 
-[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
+[![Version](https://img.shields.io/badge/version-1.0.4-blue.svg?style=flat-square)](https://github.com/Sanskar-Awachar-commits/fetchd/releases)
 [![Build Status](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml/badge.svg)](https://github.com/Sanskar-Awachar-commits/fetchd/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg?style=flat-square)](https://www.python.org/)
 
-Lightweight background utility to sync personal CLI tools and GitHub release binaries across machines.
+Lightweight background utility to sync personal CLI tools, GitHub release binaries, and repository sources across machines.
 
 ## Features
 
 - Downloads latest precompiled binaries from GitHub Releases
 - Automatic fallback to git clone & source build if release binary is missing
-- Smart state tracking (`~/.config/fetchd/state.json`) to skip already up-to-date binaries and avoid redundant downloads
+- Direct repository / source folder sync (`type: "clone"`) with custom destinations and subfolder rules
+- Smart state tracking (`~/.config/fetchd/state.json`) to skip already up-to-date binaries and repositories
 - Safe in-place binary replacement (supports active executables on Windows/POSIX)
 - Non-blocking lock to prevent overlapping runs
 - Native background scheduler setup (Windows Task Scheduler, macOS launchd, Linux systemd/cron)
-- Whitelist (`env`) to control which tools are added to PATH and `.env`
+- Whitelist (`env`) to control which tools are added to PATH and `.env` (non-binary/clone repos are kept safely isolated)
 - Project helper (`--add`) to inspect any repository and generate its configuration snippet
 
 ---
@@ -56,7 +57,7 @@ python fetchd.py
 # Run sync once (uses ~/.config/fetchd/config.json)
 fetchd
 
-# Force download/rebuild even if binaries are already up to date
+# Force download/rebuild even if binaries or repos are already up to date
 fetchd --force
 
 # Run sync with custom config file
@@ -67,6 +68,9 @@ fetchd --version
 
 # Inspect current project and generate fetchd config snippet
 fetchd --add
+
+# Inspect current project as a clone/repo sync with custom target & rules
+fetchd --add --type clone --target ~/documents/notes --rules src --save
 
 # Inspect and automatically append to ~/.config/fetchd/config.json
 fetchd --add --save
@@ -106,6 +110,17 @@ On first run, `fetchd` automatically creates `~/.config/fetchd/config.json`:
       "binary_name": "example-tool",
       "env": false,
       "build_command": "g++ -O3 -std=c++20 main.cpp -o example-tool"
+    },
+    {
+      "repo": "Sanskar-Awachar-commits/notes",
+      "type": "clone",
+      "target_dir": "~/documents/notes"
+    },
+    {
+      "repo": "Sanskar-Awachar-commits/my-snippets",
+      "type": "clone",
+      "target_dir": "~/snippets",
+      "rules": "src"
     }
   ]
 }
@@ -115,12 +130,16 @@ On first run, `fetchd` automatically creates `~/.config/fetchd/config.json`:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `install_dir` | string | `~/programs` | Directory where binaries are stored. |
+| `install_dir` | string | `~/programs` | Default directory where binaries and default clones are stored. |
 | `projects` | list | `[]` | List of repositories to sync. |
-| `projects[].repo` | string | *required* | `owner/repo` path on GitHub. |
-| `projects[].binary_name` | string | *required* | Target executable name (`.exe` added automatically on Windows). |
-| `projects[].env` | boolean | `false` | When `true`, links binary to `install_dir/bin` and exports to `~/.config/fetchd/.env` / `PATH`. |
-| `projects[].build_command` | string | `null` | Build command to run if no release binary is found. |
+| `projects[].repo` | string | *required* | `owner/repo` path on GitHub or git URL. |
+| `projects[].type` | string | `"binary"` | Sync mode: `"binary"` (release binary/build) or `"clone"` (repository / folder sync). |
+| `projects[].target_dir` | string | `install_dir/<repo>` | Target destination for cloned repos/folders (supports `~` expansion). |
+| `projects[].rules` | string / object | `null` | Subfolder rule to copy/sync from the repository (e.g. `"src"` or `"docs"`). |
+| `projects[].binary_name` | string | *conditional* | Target executable name (required for binary projects; `.exe` added automatically on Windows). |
+| `projects[].env` | boolean | `false` | When `true`, links binary to `install_dir/bin` and exports to `~/.config/fetchd/.env` / `PATH`. Non-binary clone repos are kept isolated. |
+| `projects[].build_command` | string | `null` | Build command to run if no prebuilt release binary is found. |
+| `projects[].branch` | string | `null` | Specific branch or tag to clone/track. |
 
 ---
 
@@ -141,3 +160,4 @@ $env:GITHUB_TOKEN="ghp_xxx"
 ## License
 
 MIT
+

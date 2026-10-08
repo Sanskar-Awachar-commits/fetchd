@@ -23,20 +23,32 @@ description: >-
 
 When a user creates a new project or asks to add/register a tool with `fetchd`:
 
-### 1. Inquire / Determine Environment Whitelist (`env`)
+### 1. Inquire / Determine Sync Mode & Environment Whitelist
 Ask the user (or determine from context):
 - **CLI Utilities** (e.g. `ax`, `wifidot`, `ppar`, `dotdot`, `xc`): Set `"env": true` to expose in `PATH` and `.env`.
 - **GUI Tools / Standalone Programs** (e.g. `code-graph-visualizer`): Set `"env": false` so they stay isolated in the install directory.
+- **Documentation / Markdown / Source Repositories** (e.g. notes, templates, plugins): Set `"type": "clone"` with optional `"target_dir"` and `"rules"` (e.g. `"rules": "src"`).
 
 ### 2. Format the Configuration Snippet
 Generate the project entry for the user's `config.json`:
 
+**Binary Project:**
 ```json
 {
   "repo": "Sanskar-Awachar-commits/<repo-name>",
   "binary_name": "<binary-name>",
   "env": true,
   "build_command": "<build-command>"
+}
+```
+
+**Clone / Source / Documentation Project:**
+```json
+{
+  "repo": "Sanskar-Awachar-commits/<repo-name>",
+  "type": "clone",
+  "target_dir": "~/documents/<repo-name>",
+  "rules": "src"
 }
 ```
 
