@@ -440,13 +440,6 @@ def sync_clone_project(item: dict, install_dir: Path, state: dict = None, force:
     if repo_name.endswith(".git"):
         repo_name = repo_name[:-4]
 
-    # Target directory resolution (supports custom location or defaults to install_dir/repo_name)
-    raw_target = item.get("target_dir") or item.get("dest") or item.get("path") or item.get("destination") or item.get("clone_dir")
-    if raw_target:
-        target_path = Path(os.path.expanduser(raw_target)).resolve()
-    else:
-        target_path = (install_dir / repo_name).resolve()
-
     branch = item.get("branch") or item.get("ref")
 
     # Rules / subpath copying (e.g., only sync 'src' folder or docs)
@@ -458,6 +451,16 @@ def sync_clone_project(item: dict, install_dir: Path, state: dict = None, force:
         src_subpath = rules
     if not src_subpath:
         src_subpath = item.get("src_dir") or item.get("subdir") or item.get("subpath") or item.get("sparse_path")
+
+    # Target directory resolution (supports custom location, parent directory, or defaults to install_dir/repo_name)
+    raw_target = item.get("target_dir") or item.get("dest") or item.get("path") or item.get("destination") or item.get("clone_dir")
+    if raw_target:
+        target_path = Path(os.path.expanduser(raw_target)).resolve()
+        if not src_subpath and target_path.name.lower() != repo_name.lower():
+            if target_path.is_dir() and not (target_path / ".git").exists():
+                target_path = (target_path / repo_name).resolve()
+    else:
+        target_path = (install_dir / repo_name).resolve()
 
     print(f"\n[+] Checking repository sync for {repo} -> {target_path}...")
 
